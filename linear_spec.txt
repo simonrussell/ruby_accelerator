@@ -1,0 +1,20 @@
+register 0 is always nil
+
+.regcount number of local registers
+
+nop
+
+
+
+call dest_reg, target, method     # uses preset args
+call_0 dest_reg, target, method   # 0 args
+call_1 dest_reg, target, method, arg_1_reg    # args
+call_2 etc
+to call_9
+
+jump dest
+jump_true reg, dest
+jump_false reg, dest
+
+
+return result_reg
