@@ -1,3 +1,5 @@
+# Copyright (c) 2009 Simon Russell.  All rights reserved.
+
 require 'ruby_accelerator'
 require 'benchmark'
 

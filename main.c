@@ -1,3 +1,8 @@
+/*
+  Copyright (c) 2009 Simon Russell.  All rights reserved.
+*/
+
+
 #include <ruby.h>
 #include <node.h>
 #include <env.h>
