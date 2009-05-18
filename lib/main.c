@@ -9,7 +9,8 @@
 
 enum INSTRUCTIONS {
   VM_NOP = 0,
-
+  
+  VM_BLOCK = 4,
   VM_RETURN = 5,
 
   VM_CALL = 9,
@@ -25,6 +26,14 @@ enum INSTRUCTIONS {
 
   VM_MOVE = 60
 };
+
+#define RA_FRAME_SELF(f) ((f)[0])
+#define RA_FRAME_CODE(f) ((f)[1])
+#define RA_FRAME_REGCOUNT(f) (FIX2INT((f)[2]))
+#define RA_FRAME_INITIAL_IP(f) (FIX2INT((f)[3]))
+#define RA_FRAME_INITIAL_IP_SET(f, v) ((f)[3] = INT2FIX(v))
+#define RA_FRAME_REG_START 4
+#define RA_FRAME_REGS(f) (RA_FRAME_REGCOUNT(f) > 1 ? (f) + RA_FRAME_REG_START : NULL)
 
 static inline
 VALUE load_reg(int reg_num, VALUE *regs, int reg_len, VALUE *code, int code_len, VALUE self)
@@ -68,6 +77,7 @@ void store_reg(int reg_num, VALUE *regs, int reg_len, VALUE value)
 static inline
 VALUE do_funcall1(VALUE target, ID method, VALUE arg)
 {
+#ifdef RA_OPTIMIZE
   // Just as an example
   if (FIXNUM_P(target) && FIXNUM_P(arg))
   {
@@ -86,6 +96,7 @@ VALUE do_funcall1(VALUE target, ID method, VALUE arg)
     
   // just do the work  
 other:
+#endif
   return rb_funcall2(target, method, 1, &arg);
 }
 
@@ -93,22 +104,21 @@ other:
 #define NEXT_IP_INT  FIX2INT(NEXT_IP)
 #define LOAD_REG(x)    (load_reg((x), regs, reg_len, code, code_len, self))
 #define STORE_REG(x, v) (store_reg((x), regs, reg_len, (v)))
-#define CURRENT_OP   (code[ip - 1])
+#define CURRENT_OP   (FIX2INT(code[ip - 1]))
 
 static
-VALUE execute_linear(VALUE self, VALUE code_array)
+VALUE execute_linear_frame(VALUE self, VALUE *frame)
 {
-  Check_Type(code_array, T_ARRAY);
-  
-  VALUE *code = RARRAY(code_array)->ptr;
-  int code_len = RARRAY(code_array)->len;
-  VALUE result = Qundef;
-  int ip = 1;
-  int i;
+  Check_Type(RA_FRAME_CODE(frame), T_ARRAY);
 
-  int reg_len = FIX2INT(code[0]);
-  VALUE *regs = (reg_len > 2 ? ALLOCA_N(VALUE, reg_len) : NULL);   // if reg_len is one, they only have default void reg (Qnil)
-  if (regs) for (i = 0; i < reg_len; i++) regs[i] = Qnil;
+  VALUE *code = RARRAY(RA_FRAME_CODE(frame))->ptr;
+  int code_len = RARRAY(RA_FRAME_CODE(frame))->len;
+
+  VALUE *regs = RA_FRAME_REGS(frame);
+  int reg_len = RA_FRAME_REGCOUNT(frame);
+
+  int ip = RA_FRAME_INITIAL_IP(frame);
+  int block_ip = 0;
 
   int dest_reg;
   VALUE value;
@@ -116,11 +126,11 @@ VALUE execute_linear(VALUE self, VALUE code_array)
   VALUE call_target;
   ID call_method;
 
-  while(result == Qundef)
+  //printf("begin\n");
+
+  for(;;)
   {
-/*    if (regs)
-      for (i = 0; i < reg_len; i++)
-        rb_p(regs[i]);*/
+    //printf("%i %i\n", ip, FIX2INT(code[ip]));
 
     // we're going to trust the instructions have been verified
     switch(NEXT_IP_INT)
@@ -128,6 +138,10 @@ VALUE execute_linear(VALUE self, VALUE code_array)
       case VM_NOP:
         // it's a nop.
         break;
+
+      case VM_BLOCK:
+        block_ip = NEXT_IP_INT;
+        continue;   // skip over block clear
 
       case VM_JUMP:     // always jump
         ip = FIX2INT(code[ip]);
@@ -153,14 +167,23 @@ VALUE execute_linear(VALUE self, VALUE code_array)
         break;
 
       case VM_RETURN:
-        result = LOAD_REG(NEXT_IP_INT);
-        break;
+        return LOAD_REG(NEXT_IP_INT);
 
       case VM_CALL_0:
         dest_reg = NEXT_IP_INT;
         call_target = LOAD_REG(NEXT_IP_INT);
         call_method = (ID) NEXT_IP_INT;
-        STORE_REG(dest_reg, rb_funcall2(call_target, call_method, 0, NULL));
+
+        if (block_ip > 0)
+        {
+          //printf("calling\n");
+          RA_FRAME_INITIAL_IP_SET(frame, block_ip);
+          STORE_REG(dest_reg, rb_block_call(call_target, call_method, 0, NULL, execute_linear_frame, (VALUE) frame));   // lame cast?
+        }
+        else
+        {
+          STORE_REG(dest_reg, rb_funcall2(call_target, call_method, 0, NULL));
+        }
         break;
         
       case VM_CALL_1:
@@ -175,13 +198,30 @@ VALUE execute_linear(VALUE self, VALUE code_array)
         rb_raise(rb_eStandardError, "invalid opcode %d", CURRENT_OP);
         break;
     }
+
+    // we skip over this for VM_BLOCK
+    block_ip = 0;
   }
 
-  return result;
+  return Qundef;  // we shouldn't actually get here...
 }
 
+static
+VALUE execute_linear(VALUE self, VALUE code_array)
+{
+  Check_Type(code_array, T_ARRAY);
 
+  int reg_len = FIX2INT(RARRAY(code_array)->ptr[0]);
+  VALUE *frame = ALLOCA_N(VALUE, RA_FRAME_REG_START + reg_len);
+  memset(frame + RA_FRAME_REG_START, 0, sizeof(VALUE) * reg_len);
 
+  frame[0] = self;
+  frame[1] = code_array;
+  frame[2] = INT2FIX(reg_len);
+  frame[3] = INT2FIX(1);
+
+  return execute_linear_frame(self, frame);
+}
 
 
 
@@ -328,7 +368,7 @@ VALUE define_accelerator_method(VALUE self, VALUE klass, VALUE name, VALUE body)
   return Qnil;
 }
 
-void Init_ruby_accelerator(void)
+void Init_ruby_accelerator_native(void)
 {
   VALUE module = rb_define_module("RubyAccelerator");
 

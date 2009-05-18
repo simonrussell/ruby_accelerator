@@ -1,14 +1,18 @@
 #!/usr/bin/ruby
 
 require 'benchmark'
-require 'ruby_accelerator'
+require "#{File.dirname(__FILE__)}/lib/ruby_accelerator"
 
 MULTIPLE = 1_000_000
 
 Benchmark.bmbm do |benchmark|
-if false
+
   benchmark.report 'inline op' do
     MULTIPLE.times { 1+1 }
+  end
+
+  benchmark.report 'inline op x 10' do
+    (MULTIPLE / 10).times { 1+1; 1+1; 1+1; 1+1; 1+1; 1+1; 1+1; 1+1; 1+1; 1+1 }
   end
 
   benchmark.report 'inline op while loop' do
@@ -56,13 +60,67 @@ if false
   benchmark.report 'addtest3' do
     RubyAccelerator::addtest3(MULTIPLE)
   end
-end
+
   benchmark.report 'execute' do
     RubyAccelerator.execute([
       [:block_call, MULTIPLE, :times, [
         [:call, 1, :+, 1]
       ]]
     ])
+  end
+
+  linear = RubyAccelerator::Assembler.assemble(
+    [
+      {
+        :TIMES => MULTIPLE,
+        :VALUE => 1
+      },
+
+      [:block, :block],  
+      [:call_0, :r0, :TIMES, :times],
+      [:return, :r0],
+
+    :block,
+      [:call_1, :void, :VALUE, :+, :VALUE],
+      [:return, :void]
+    ]
+  )
+
+  benchmark.report 'execute_linear' do
+    RubyAccelerator.execute_linear(linear)
+  end
+
+  linear10 = RubyAccelerator::Assembler.assemble(
+    [
+      {
+        :TIMES => MULTIPLE / 10,
+        :VALUE => 1
+      },
+
+      [:block, :block],  
+      [:call_0, :r0, :TIMES, :times],
+      [:return, :r0],
+
+    :block,
+      [:call_1, :void, :VALUE, :+, :VALUE],
+      [:call_1, :void, :VALUE, :+, :VALUE],
+      [:call_1, :void, :VALUE, :+, :VALUE],
+
+      [:call_1, :void, :VALUE, :+, :VALUE],
+      [:call_1, :void, :VALUE, :+, :VALUE],
+      [:call_1, :void, :VALUE, :+, :VALUE],
+
+      [:call_1, :void, :VALUE, :+, :VALUE],
+      [:call_1, :void, :VALUE, :+, :VALUE],
+      [:call_1, :void, :VALUE, :+, :VALUE],
+      [:call_1, :void, :VALUE, :+, :VALUE],
+
+      [:return, :void]
+    ]
+  )
+
+  benchmark.report 'execute_linear x 10' do
+    RubyAccelerator.execute_linear(linear10)
   end
 
 end

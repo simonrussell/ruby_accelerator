@@ -1,4 +1,4 @@
-require 'ruby_accelerator'
+require 'lib/ruby_accelerator'
 
 RubyAccelerator.execute([
   [:block_call, 10, :times, [

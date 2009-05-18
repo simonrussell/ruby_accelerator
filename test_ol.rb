@@ -1,4 +1,4 @@
-require 'ruby_accelerator'
+require 'lib/ruby_accelerator'
 require 'benchmark'
 
 MULTIPLE = 1_000_000
